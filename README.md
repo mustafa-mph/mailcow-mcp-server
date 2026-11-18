@@ -94,6 +94,7 @@ Without Docker, run `npm install` and then `SESSION_FILE=./data/sessions.json np
 - **The Mailcow API key has full control of your mail server.** Keep `.env` private, and in Mailcow restrict the key to this server's IP.
 - **Saved sign-ins.** They are AES-256-GCM encrypted in `data/sessions.json`. Access tokens are stored only as hashes and expire after 90 days.
 - **Brute-force protection.** 5 failed sign-ins per IP address lock that IP out for 10 minutes.
+- **Password changes and disabled mailboxes.** The mailbox login is checked again every time the client connects. If the password was changed or the mailbox was disabled, the sign-in is dropped and the user must sign in again. A disabled admin mailbox therefore loses admin access at its next connection.
 - **Only run it behind HTTPS.**
 
 ## Files

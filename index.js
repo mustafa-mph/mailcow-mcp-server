@@ -38,16 +38,28 @@ const MAIL_DOMAIN = (process.env.USER_MAIL_DOMAIN || "").trim();
 const BRAND_NAME = process.env.BRAND_NAME || "Mailcow MCP";
 const ADMINS_ONLY = (process.env.ADMINS_ONLY || "false") === "true"; // true = non-admins cannot sign in at all
 
-async function verifyLogin(email, password) {
-  if (ADMINS_ONLY && !isAdminEmail(email)) return false;
+// True only when the mail server explicitly rejected the username/password (not for network errors).
+function isAuthError(err) {
+  if (!err) return false;
+  if (err.authenticationFailed === true) return true;
+  return /AUTHENTICATIONFAILED|authentication failed|invalid credentials/i.test(`${err.responseText || ""} ${err.message || ""}`);
+}
+
+// "ok" | "auth_failed" | "unavailable"
+async function checkLogin(email, password) {
   const client = new ImapFlow({ host: IMAP_HOST, port: IMAP_PORT, secure: IMAP_SECURE, auth: { user: email, pass: password }, logger: false });
   try {
     await client.connect();
     await client.logout().catch(() => {});
-    return true;
-  } catch {
-    return false;
+    return "ok";
+  } catch (err) {
+    return isAuthError(err) ? "auth_failed" : "unavailable";
   }
+}
+
+async function verifyLogin(email, password) {
+  if (ADMINS_ONLY && !isAdminEmail(email)) return false;
+  return (await checkLogin(email, password)) === "ok";
 }
 
 // ---- HTTP app ----
@@ -73,17 +85,31 @@ function callerForToken(token) {
   if (!s) return null;
   const isAdmin = isAdminEmail(s.email);
   if (ADMINS_ONLY && !isAdmin) return null;
-  return { isAdmin, userEmail: s.email };
+  return { isAdmin, userEmail: s.email, session: s };
 }
+
+const isInitialize = (body) => (Array.isArray(body) ? body : [body]).some((m) => m && m.method === "initialize");
 
 app.use((req, _res, next) => { if (req.path === "/") req.url = "/mcp" + req.url.slice(1); next(); });
 
 app.post("/mcp", async (req, res) => {
   const auth = req.headers["authorization"] || "";
-  const caller = callerForToken(auth.startsWith("Bearer ") ? auth.slice(7) : null);
-  if (!caller) {
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
+  const unauthorized = () => {
     res.set("WWW-Authenticate", `Bearer resource_metadata="${PUBLIC_BASE_URL}/.well-known/oauth-protected-resource${req.originalUrl.startsWith("/mcp") ? "/mcp" : ""}"`);
     return res.status(401).json({ error: "Unauthorized" });
+  };
+  const caller = callerForToken(token);
+  if (!caller) return unauthorized();
+
+  // On every (re)connect, re-check the mailbox login. A changed password or a disabled mailbox
+  // ends the sign-in, so the user must sign in again - and loses admin access if the mailbox is gone.
+  if (caller.session && isInitialize(req.body)) {
+    if ((await checkLogin(caller.session.email, caller.session.password)) === "auth_failed") {
+      sessions.revoke(token);
+      console.error(`saved password rejected for ${caller.session.email}: signed out`);
+      return unauthorized();
+    }
   }
   try {
     const server = new McpServer({ name: "mailcow-mcp-server", version: "1.0.0" });
