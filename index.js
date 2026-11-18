@@ -14,6 +14,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { setupOAuth, createSessionStore } from "./oauth.js";
 import { registerMailcowTools, mailcowEnabled, mailcowReadOnly, isAdminEmail } from "./mailcow.js";
+import { parseAdminUsers, verifyPassword } from "./admin-users.js";
 
 const die = (msg) => { console.error(msg); process.exit(1); };
 
@@ -37,6 +38,12 @@ const IMAP_SECURE = (process.env.USER_IMAP_SECURE || "true") === "true";
 const MAIL_DOMAIN = (process.env.USER_MAIL_DOMAIN || "").trim();
 const BRAND_NAME = process.env.BRAND_NAME || "Mailcow MCP";
 const ADMINS_ONLY = (process.env.ADMINS_ONLY || "false") === "true"; // true = non-admins cannot sign in at all
+// Local admin logins (username + scrypt hash), checked by this server - not mailboxes
+const ADMIN_USERS = parseAdminUsers(process.env.ADMIN_USERS);
+// MAILBOX_SIGNIN=false turns off mailbox (IMAP) sign-in completely, so only ADMIN_USERS can sign in
+const MAILBOX_SIGNIN = (process.env.MAILBOX_SIGNIN || "true") === "true";
+if (!MAILBOX_SIGNIN && ADMIN_USERS.size === 0 && !process.env.MCP_AUTH_TOKEN) die("MAILBOX_SIGNIN=false needs ADMIN_USERS (run ./set-admin-password.sh <username>) or MCP_AUTH_TOKEN.");
+const isAdminUser = (id) => ADMIN_USERS.has(String(id || "").toLowerCase());
 
 // True only when the mail server explicitly rejected the username/password (not for network errors).
 function isAuthError(err) {
@@ -46,7 +53,11 @@ function isAuthError(err) {
 }
 
 // "ok" | "auth_failed" | "unavailable"
+// Admin usernames are checked against ADMIN_USERS; anything else is treated as a mailbox (IMAP login).
 async function checkLogin(email, password) {
+  const id = String(email || "").toLowerCase();
+  if (isAdminUser(id)) return verifyPassword(password, ADMIN_USERS.get(id)) ? "ok" : "auth_failed";
+  if (!MAILBOX_SIGNIN || !id.includes("@")) return "auth_failed"; // removed admin user, or mailbox sign-in disabled
   const client = new ImapFlow({ host: IMAP_HOST, port: IMAP_PORT, secure: IMAP_SECURE, auth: { user: email, pass: password }, logger: false });
   try {
     await client.connect();
@@ -58,7 +69,7 @@ async function checkLogin(email, password) {
 }
 
 async function verifyLogin(email, password) {
-  if (ADMINS_ONLY && !isAdminEmail(email)) return false;
+  if (!isAdminUser(email) && ADMINS_ONLY && !isAdminEmail(email)) return false;
   return (await checkLogin(email, password)) === "ok";
 }
 
@@ -73,7 +84,17 @@ app.use((req, res, next) => {
   next();
 });
 
-setupOAuth(app, { baseUrl: PUBLIC_BASE_URL, verifyLogin, sessions, mailDomain: MAIL_DOMAIN, brandName: BRAND_NAME });
+const loginLabel = !MAILBOX_SIGNIN ? "Admin username" : ADMIN_USERS.size ? "Admin username or mailbox email" : "Email";
+setupOAuth(app, {
+  baseUrl: PUBLIC_BASE_URL, verifyLogin, sessions, brandName: BRAND_NAME,
+  mailDomain: ADMIN_USERS.size ? "" : MAIL_DOMAIN, // a domain filter would block admin usernames
+  loginLabel,
+  intro: !MAILBOX_SIGNIN
+    ? `Sign in with your ${BRAND_NAME} admin username and password.`
+    : ADMIN_USERS.size
+      ? `Sign in with your ${BRAND_NAME} admin username, or with your mailbox email and password.`
+      : undefined,
+});
 
 const sameSecret = (a, b) =>
   crypto.timingSafeEqual(crypto.createHash("sha256").update(String(a)).digest(), crypto.createHash("sha256").update(String(b)).digest());
@@ -83,6 +104,8 @@ function callerForToken(token) {
   if (AUTH_TOKEN && sameSecret(token, AUTH_TOKEN)) return { isAdmin: true };
   const s = sessions.get(token);
   if (!s) return null;
+  if (isAdminUser(s.email)) return { isAdmin: true, session: s }; // local admin login: no mailbox, no self-service tools
+  if (!MAILBOX_SIGNIN) return null;
   const isAdmin = isAdminEmail(s.email);
   if (ADMINS_ONLY && !isAdmin) return null;
   return { isAdmin, userEmail: s.email, session: s };
@@ -131,6 +154,7 @@ const PORT = Number(process.env.PORT || "3901");
 app.listen(PORT, () => {
   console.error(
     `mailcow-mcp-server listening on :${PORT} | public URL ${PUBLIC_BASE_URL} | mailcow ${MAILCOW_HOST} (${mailcowReadOnly ? "read-only" : "read-write"})` +
-      ` | sign-in via ${IMAP_HOST}:${IMAP_PORT} (domain: ${MAIL_DOMAIN || "any"}, ${ADMINS_ONLY ? "admins only" : "all users"}, saved sign-ins: ${sessions.count()})`
+      ` | admin logins: ${[...ADMIN_USERS.keys()].join(", ") || "none"}` +
+      ` | mailbox sign-in: ${MAILBOX_SIGNIN ? `${IMAP_HOST}:${IMAP_PORT} (${ADMINS_ONLY ? "ADMIN_EMAILS only" : "all users"})` : "off"} | saved sign-ins: ${sessions.count()}`
   );
 });

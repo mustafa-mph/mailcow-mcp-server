@@ -14,7 +14,12 @@ Claude ──HTTPS──▶ reverse proxy ──▶ mailcow-mcp-server :3901 ─
 
 ## How access works
 
-- **Sign-in.** Users connect the URL in Claude and sign in with their Mailcow mailbox email and password. The password is checked with an IMAP login against your Mailcow server.
+- **Admin logins.** Create a username and password that belong to this server, separate from mailboxes:
+  ```bash
+  ./set-admin-password.sh admin      # asks for the password (hidden), stores only a scrypt hash in .env, restarts
+  ```
+  Admin logins always get the admin tools. Set `MAILBOX_SIGNIN=false` to allow **only** admin logins. Mailcow has no API for checking the password of a Mailcow web-panel admin, so these logins are managed here instead. Run the same command again to change a password; remove the entry from `ADMIN_USERS` to delete the login, which also ends that admin's existing sign-ins.
+- **Mailbox sign-in.** Users can also sign in with their Mailcow mailbox email and password, checked with an IMAP login against your Mailcow server.
 - **Admins.** Addresses listed in `ADMIN_EMAILS` get the admin tools.
 - **Everyone else.** Other users get **self-service** tools that only ever see or change their own mailbox. Set `ADMINS_ONLY=true` to stop non-admins signing in at all.
 - **Optional static token.** `MCP_AUTH_TOKEN` gives admin access to headless clients and scripts.
@@ -81,6 +86,8 @@ Without Docker, run `npm install` and then `SESSION_FILE=./data/sessions.json np
 | `MAILCOW_API_ACCESS` | | `read-write` (default) or `read-only` |
 | `PUBLIC_BASE_URL` | yes | Public HTTPS URL of this server |
 | `SESSION_SECRET` | yes | 32+ random characters; encrypts saved sign-ins |
+| `ADMIN_USERS` | | Local admin logins as `username:scrypt-hash`; manage them with `./set-admin-password.sh` |
+| `MAILBOX_SIGNIN` | | `false` = only `ADMIN_USERS` can sign in |
 | `ADMIN_EMAILS` | | Comma list of mailboxes that get the admin tools |
 | `ADMINS_ONLY` | | `true` = only admins may sign in |
 | `USER_MAIL_DOMAIN` | | Only allow `@this-domain` addresses to sign in |
@@ -100,8 +107,11 @@ Without Docker, run `npm install` and then `SESSION_FILE=./data/sessions.json np
 ## Files
 
 ```
-index.js     HTTP server, sign-in routing, admin vs self-service
-mailcow.js   Mailcow API client and all tools
+index.js              HTTP server, sign-in routing, admin vs self-service
+mailcow.js            Mailcow API client and all tools
+admin-users.js        Local admin logins (scrypt hashes)
+hash-password.js      Makes an ADMIN_USERS entry from a typed password
+set-admin-password.sh Creates/changes an admin login in .env and restarts
 oauth.js     OAuth 2.1 endpoints (dynamic registration + PKCE), sign-in page, encrypted session store
 ```
 

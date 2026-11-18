@@ -61,7 +61,8 @@ export function createSessionStore({ file, secret }) {
   };
 }
 
-export function setupOAuth(app, { baseUrl, verifyLogin, sessions, mailDomain, brandName = "Mail MCP" }) {
+export function setupOAuth(app, { baseUrl, verifyLogin, sessions, mailDomain, brandName = "Mail MCP", loginLabel = "Email", intro }) {
+  const loginIsEmail = loginLabel === "Email";
   const clients = new Map();
   const codes = new Map();
   const fails = new Map(); // ip -> wrong-login count, reset every 10 minutes
@@ -135,24 +136,24 @@ export function setupOAuth(app, { baseUrl, verifyLogin, sessions, mailDomain, br
 .card{width:100%;max-width:400px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px}
 h1{font-size:20px;margin:0 0 6px}p{color:var(--muted);margin:0 0 20px;font-size:14px;line-height:1.5}
 label{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}
-input[type=email],input[type=password]{width:100%;padding:11px 12px;font-size:16px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--text)}
+input[type=email],input[type=text],input[type=password]{width:100%;padding:11px 12px;font-size:16px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--text)}
 input:focus{outline:2px solid var(--accent);outline-offset:1px}
 button{margin-top:20px;width:100%;padding:12px;font-size:16px;font-weight:600;border:0;border-radius:8px;background:var(--accent);color:#fff;cursor:pointer}
 .err{color:var(--err);font-size:14px;margin:0 0 8px}.foot{margin-top:16px;font-size:12px;color:var(--muted);text-align:center}
 </style></head><body><main class="card">
 <h1>Sign in to your mailbox</h1>
-<p>Use your ${mailDomain ? `@${esc(mailDomain)} ` : ""}email address and password to connect your mailbox to ${esc(brandName)}.</p>
+<p>${intro ? esc(intro) : `Use your ${mailDomain ? `@${esc(mailDomain)} ` : ""}email address and password to connect your mailbox to ${esc(brandName)}.`}</p>
 ${err ? `<p class="err" role="alert">${esc(err)}</p>` : ""}
 <form method="post" action="/authorize">
 ${["client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method", "response_type"]
   .map((k) => `<input type="hidden" name="${k}" value="${esc(q[k])}">`).join("")}
-<label for="email">Email</label>
-<input id="email" type="email" name="email" value="${esc(email)}" autocomplete="username" required ${email ? "" : "autofocus"}>
+<label for="email">${esc(loginLabel)}</label>
+<input id="email" type="${loginIsEmail ? "email" : "text"}" name="email" autocapitalize="none" spellcheck="false" value="${esc(email)}" autocomplete="username" required ${email ? "" : "autofocus"}>
 <label for="password">Password</label>
 <input id="password" type="password" name="password" autocomplete="current-password" required ${email ? "autofocus" : ""}>
 <button type="submit">Sign in and connect</button>
 </form>
-<div class="foot">Your password is checked against the mail server and stored encrypted.</div>
+<div class="foot">${loginIsEmail ? "Your password is checked against the mail server and stored encrypted." : "Your sign-in is checked by this server and stored encrypted."}</div>
 </main></body></html>`;
 
   app.get("/authorize", (req, res) => {
@@ -170,7 +171,7 @@ ${["client_id", "redirect_uri", "state", "code_challenge", "code_challenge_metho
 
     const email = String(q.email || "").trim().toLowerCase();
     const password = String(q.password || "");
-    if (!email || !password) return res.status(400).send(page(q, "Enter your email and password.", email));
+    if (!email || !password) return res.status(400).send(page(q, `Enter your ${loginIsEmail ? "email" : "username"} and password.`, email));
     if (mailDomain && !email.endsWith("@" + mailDomain.toLowerCase()))
       return res.status(401).send(page(q, `Only @${mailDomain} mailboxes can sign in here.`, email));
 
@@ -178,7 +179,7 @@ ${["client_id", "redirect_uri", "state", "code_challenge", "code_challenge_metho
     if (!ok) {
       fails.set(ip, (fails.get(ip) || 0) + 1);
       console.error(`login failed for ${email}`);
-      return res.status(401).send(page(q, "Wrong email or password.", email));
+      return res.status(401).send(page(q, `Wrong ${loginIsEmail ? "email" : "username"} or password.`, email));
     }
     console.error(`login ok for ${email}`);
 
