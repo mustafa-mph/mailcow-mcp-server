@@ -1,0 +1,22 @@
+{
+  "name": "mailcow-mcp-server",
+  "version": "1.0.0",
+  "description": "Remote MCP server to manage a Mailcow mail server from Claude: domains, mailboxes, aliases, queue, sync jobs, DKIM, quarantine, logs - with mailbox sign-in (OAuth) and per-user self-service",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": ["mcp", "model-context-protocol", "mailcow", "mail-server", "admin", "claude", "oauth"],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "imapflow": "^1.0.171",
+    "zod": "^3.23.8"
+  }
+}

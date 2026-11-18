@@ -1,0 +1,24 @@
+# mailcow-mcp-server - start:   docker compose up -d --build
+# Put a TLS reverse proxy (Caddy, Nginx, Traefik) in front of port 3901; see README.
+services:
+  mailcow-mcp-server:
+    build: .
+    image: mailcow-mcp-server:latest
+    container_name: mailcow-mcp-server
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:3901:3901"   # only reachable from this host; your reverse proxy forwards to it
+    volumes:
+      - ./data:/data            # encrypted user sign-ins (sessions.json)
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3901/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
